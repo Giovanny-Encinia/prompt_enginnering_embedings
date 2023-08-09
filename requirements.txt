@@ -1,0 +1,6 @@
+openai
+panel
+pypdf
+numpy
+azure-storage-blob
+pandas
