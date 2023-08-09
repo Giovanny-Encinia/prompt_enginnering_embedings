@@ -4,3 +4,4 @@ pypdf
 numpy
 azure-storage-blob
 pandas
+langchain

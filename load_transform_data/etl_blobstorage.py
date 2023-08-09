@@ -81,6 +81,42 @@ def get_azure_primary_key(name_env_variable: str = "AZURE_KEY") -> str:
     return azure_key
 
 
+def get_azure_base(name_env_variable: str = "AZURE_BASE") -> str:
+    """
+    Retrieve the Azure base from an environment variable.
+
+    This function retrieves the Azure base from the specified environment
+    variable. If the environment variable is not set or has no value, an exception
+    is raised with a corresponding error message.
+
+    Parameters
+    ----------
+    name_env_variable : str, optional
+        The name of the environment variable containing the Azure primary key.
+        The default is "AZURE_BASE".
+
+    Returns
+    -------
+    str
+        The retrieved Azure primary key.
+
+    Raises
+    ------
+    Exception
+        If the specified environment variable is not set or has no value, an
+        exception is raised with an error message suggesting to reload the
+        environment or create the variable.
+    """
+    azure_base = os.getenv(name_env_variable, False)
+
+    if not azure_base:
+        raise Exception(
+            "There is no variable, reload the environment or create the variable"
+        )
+
+    return azure_base
+
+
 def retrieve_file_from_blob_storage(
     container_client: ContainerClient, blob_name: str
 ) -> StorageStreamDownloader:
@@ -248,4 +284,6 @@ def create_clean_pandas_document_dataframe_from_blob(
 
 
 if __name__ == "__main__":
-    print(create_clean_pandas_document_dataframe_from_blob().head())
+    df = create_clean_pandas_document_dataframe_from_blob().head()
+    print(df)
+    print(df.columns)
