@@ -5,3 +5,13 @@ numpy
 azure-storage-blob
 pandas
 langchain
+unstructured==0.7.12
+num2words
+matplotlib
+plotly
+scipy
+scikit-learn
+tiktoken
+requests
+pyarrow
+fastparquet
