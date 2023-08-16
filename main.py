@@ -7,11 +7,16 @@ from load_transform_data.etl_blobstorage import (
 )
 from load_transform_data.splitters import TextSplitter
 from load_transform_data.vectorstore import VectorStore
+from load_transform_data.search_docs import (
+    search_docs,
+    search_vectorstore,
+    retrieve_data,
+)
 from openai_api_connection.api_conection import (
     connect_api,
     get_completion_from_messages,
 )
-from prompts.paper_assistent import CONTEXT
+from prompts.paper_assistent import CONTEXT, CHECK_IF_ONLY_HELLO
 import gradio as gr
 import time
 import signal
@@ -21,7 +26,9 @@ import os
 
 def create_and_save_vectorstore():
     splitter = TextSplitter(tokens_per_document=600, overlap=40)
-    df = create_clean_pandas_document_dataframe_from_blob()
+    df = create_clean_pandas_document_dataframe_from_blob(
+        begin_path="EMBEDDINGS_TEST/langchain"
+    )
     df = splitter.generate_documents(df)
     logging.debug(df.head())
     vectorstore = VectorStore(df)
@@ -49,7 +56,10 @@ def chatbot(message, history):
 
     check_user_time_between_questions(delay_user)
     logging.info(delay_user)
-    history_openai = [{"role": "system", "content": context}]
+    res = search_docs(df, message, top_n=4)
+    text, pages = retrieve_data(res)
+    history_openai = [{"role": "system", "content": CONTEXT.format(information=text)}]
+    logging.info("system context created correctly")
 
     for user, assistant in history:
         history_openai.append({"role": "user", "content": user})
@@ -57,6 +67,12 @@ def chatbot(message, history):
 
     history_openai.append({"role": "user", "content": message})
     response = get_completion_from_messages(history_openai)
+    logging.info("response generated")
+
+    if pages != "null":
+        response += f"\n\n`References:`\n{pages}"
+
+    logging.info("writing in the chat...")
 
     for i in range(len(response)):
         time.sleep(0.005)
@@ -65,14 +81,14 @@ def chatbot(message, history):
 
 
 def run_chatbot():
-    my_theme = gr.Theme.from_hub("HaleyCH/HaleyCH_Theme")
+    my_theme = gr.Theme.from_hub("JohnSmith9982/small_and_pretty")
     chat_interface = gr.ChatInterface(
         chatbot,
-        chatbot=gr.Chatbot(height=300),
+        chatbot=gr.Chatbot(height=500),
         textbox=gr.Textbox(
-            placeholder="Ask me about artificial intelligence", container=False, scale=7
+            placeholder="Ask me about Lang Chain", container=False, scale=9
         ),
-        title="Artificial Intelligence Professor",
+        title="Lang Chain Professor",
         description="AI",
         theme=my_theme,
         examples=[""],
@@ -90,14 +106,16 @@ def handler(signum, frame):
     exit()
 
 
+# create_and_save_vectorstore()
 # Set the alarm to 1 minute (60 seconds)
 signal.signal(signal.SIGALRM, handler)
-SESSION_TOTAL_TIME = 600
-USER_DELAY_TIME = 10
+filename = "vectorstore.parquet"
+filepath = search_vectorstore(filename)
+df = pd.read_parquet(filepath)
+SESSION_TOTAL_TIME = 3600
+USER_DELAY_TIME = 600
 signal.alarm(SESSION_TOTAL_TIME)
-# create_and_save_vectorstore()
 connect_api()
-context = CONTEXT.format(information="HOLA QUE HACE")
 time_response = time.time()
 chat = run_chatbot()
 chat.queue().launch()
