@@ -1,17 +1,12 @@
-# TODO
 import logging
 import pandas as pd
 
-from load_transform_data.etl_blobstorage import (
-    create_clean_pandas_document_dataframe_from_blob,
+from load_transform_data.loader_blob_storage import (
+    AzureBlobStorageDocumentLoader,
 )
 from load_transform_data.splitters import TextSplitter
 from load_transform_data.vectorstore import VectorStore
-from load_transform_data.search_docs import (
-    search_docs,
-    search_vectorstore,
-    retrieve_data,
-)
+from load_transform_data.similarities_searcher import SimilaritiesContextSearcher
 from openai_api_connection.api_conection import (
     connect_api,
     get_completion_from_messages,
@@ -21,14 +16,18 @@ import gradio as gr
 import time
 import signal
 from openai_api_connection.api_conection import get_completion_from_messages
-import os
+from load_transform_data.utils import get_azure_primary_key, get_file_full_path
+import sys
+
+# Set the logging configuration
+logging.basicConfig(level=logging.INFO)
 
 
 def create_and_save_vectorstore():
     splitter = TextSplitter(tokens_per_document=600, overlap=40)
-    df = create_clean_pandas_document_dataframe_from_blob(
-        begin_path="EMBEDDINGS_TEST/langchain"
-    )
+    azure_key = get_azure_primary_key()
+    loader = AzureBlobStorageDocumentLoader(azure_key)
+    df = loader.load_document()
     df = splitter.generate_documents(df)
     logging.debug(df.head())
     vectorstore = VectorStore(df)
@@ -56,8 +55,10 @@ def chatbot(message, history):
 
     check_user_time_between_questions(delay_user)
     logging.info(delay_user)
-    res = search_docs(df, message, top_n=4)
-    text, pages = retrieve_data(res)
+    similarities = similarity_searcher.get_dataframe_top_similarities(
+        df, message, top_n=5
+    )
+    text, pages = similarity_searcher.get_context_and_references()
     history_openai = [{"role": "system", "content": CONTEXT.format(information=text)}]
     logging.info("system context created correctly")
 
@@ -65,6 +66,7 @@ def chatbot(message, history):
         history_openai.append({"role": "user", "content": user})
         history_openai.append({"role": "assistant", "content": assistant})
 
+    logging.info("History loaded")
     history_openai.append({"role": "user", "content": message})
     response = get_completion_from_messages(history_openai)
     logging.info("response generated")
@@ -92,10 +94,11 @@ def run_chatbot():
         description="AI",
         theme=my_theme,
         examples=[""],
-        cache_examples=True,
+        submit_btn="Submit",
+        stop_btn="Stop",
         retry_btn=None,
-        undo_btn="Delete Previous",
-        clear_btn="Clear",
+        undo_btn=None,
+        clear_btn=None,
     )
     return chat_interface
 
@@ -110,12 +113,13 @@ def handler(signum, frame):
 # Set the alarm to 1 minute (60 seconds)
 signal.signal(signal.SIGALRM, handler)
 filename = "vectorstore.parquet"
-filepath = search_vectorstore(filename)
+filepath = get_file_full_path(filename)
 df = pd.read_parquet(filepath)
 SESSION_TOTAL_TIME = 3600
 USER_DELAY_TIME = 600
 signal.alarm(SESSION_TOTAL_TIME)
 connect_api()
+similarity_searcher = SimilaritiesContextSearcher()
 time_response = time.time()
 chat = run_chatbot()
 chat.queue().launch()
