@@ -1,25 +1,121 @@
 # TODO
-from langchain.chat_models import AzureChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+import logging
+import pandas as pd
+
+from load_transform_data.etl_blobstorage import (
+    create_clean_pandas_document_dataframe_from_blob,
+)
+from load_transform_data.splitters import TextSplitter
+from load_transform_data.vectorstore import VectorStore
+from load_transform_data.search_docs import (
+    search_docs,
+    search_vectorstore,
+    retrieve_data,
+)
+from openai_api_connection.api_conection import (
+    connect_api,
+    get_completion_from_messages,
+)
+from prompts.paper_assistent import CONTEXT, CHECK_IF_ONLY_HELLO
+import gradio as gr
+import time
+import signal
+from openai_api_connection.api_conection import get_completion_from_messages
 import os
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
-DEPLOYMENT_NAME = "cx_gpt4"
-version = "2023-03-15-preview"
 
-chat = AzureChatOpenAI(
-    openai_api_key=OPENAI_API_KEY,
-    openai_api_base=OPENAI_API_BASE,
-    openai_api_version=version,
-    deployment_name=DEPLOYMENT_NAME,
-)
-template_string = """Translate the text between <<>> in {style}: <<{text}>>"""
-prompt_template = ChatPromptTemplate.from_template(template_string)
-style = "spanish informal"
-text = (
-    "I am very tired, but I have to finish the work because many people depends on me"
-)
-customer_messages = prompt_template.format_messages(style=style, text=text)
-customer_response = chat(customer_messages)
-print(customer_response)
+def create_and_save_vectorstore():
+    splitter = TextSplitter(tokens_per_document=600, overlap=40)
+    df = create_clean_pandas_document_dataframe_from_blob(
+        begin_path="EMBEDDINGS_TEST/langchain"
+    )
+    df = splitter.generate_documents(df)
+    logging.debug(df.head())
+    vectorstore = VectorStore(df)
+    df = vectorstore.create_vector_store()
+    logging.debug(df.head())
+    vectorstore.save_vector_store("vectorstore.parquet")
+    loaded_df = pd.read_parquet("./data/vectorstore.parquet")
+    print(loaded_df)
+
+
+def check_user_time_between_questions(delay_time: float):
+    if delay_time > USER_DELAY_TIME:
+        logging.info("User has abandoned the chat")
+        chat.close()
+        exit()
+
+
+def chatbot(message, history):
+    global time_response
+    time_request = time.time()
+    delay_user = time_request - time_response
+
+    if len(history) < 1:
+        delay_user = 0
+
+    check_user_time_between_questions(delay_user)
+    logging.info(delay_user)
+    res = search_docs(df, message, top_n=4)
+    text, pages = retrieve_data(res)
+    history_openai = [{"role": "system", "content": CONTEXT.format(information=text)}]
+    logging.info("system context created correctly")
+
+    for user, assistant in history:
+        history_openai.append({"role": "user", "content": user})
+        history_openai.append({"role": "assistant", "content": assistant})
+
+    history_openai.append({"role": "user", "content": message})
+    response = get_completion_from_messages(history_openai)
+    logging.info("response generated")
+
+    if pages != "null":
+        response += f"\n\n`References:`\n{pages}"
+
+    logging.info("writing in the chat...")
+
+    for i in range(len(response)):
+        time.sleep(0.005)
+        time_response = time.time()
+        yield response[: i + 1]
+
+
+def run_chatbot():
+    my_theme = gr.Theme.from_hub("JohnSmith9982/small_and_pretty")
+    chat_interface = gr.ChatInterface(
+        chatbot,
+        chatbot=gr.Chatbot(height=500),
+        textbox=gr.Textbox(
+            placeholder="Ask me about Lang Chain", container=False, scale=9
+        ),
+        title="Lang Chain Professor",
+        description="AI",
+        theme=my_theme,
+        examples=[""],
+        cache_examples=True,
+        retry_btn=None,
+        undo_btn="Delete Previous",
+        clear_btn="Clear",
+    )
+    return chat_interface
+
+
+def handler(signum, frame):
+    logging.info("Time's up! Terminating the process.")
+    gr.Info("Session finished")
+    exit()
+
+
+# create_and_save_vectorstore()
+# Set the alarm to 1 minute (60 seconds)
+signal.signal(signal.SIGALRM, handler)
+filename = "vectorstore.parquet"
+filepath = search_vectorstore(filename)
+df = pd.read_parquet(filepath)
+SESSION_TOTAL_TIME = 3600
+USER_DELAY_TIME = 600
+signal.alarm(SESSION_TOTAL_TIME)
+connect_api()
+time_response = time.time()
+chat = run_chatbot()
+chat.queue().launch()

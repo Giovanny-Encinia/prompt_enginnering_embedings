@@ -8,6 +8,10 @@ import os
 import io
 import pypdf
 import re
+from langchain.document_loaders import AzureBlobStorageContainerLoader
+from langchain.text_splitter import CharacterTextSplitter
+import time
+from collections import OrderedDict
 
 
 def connect_blob_storage(
@@ -34,15 +38,19 @@ def connect_blob_storage(
         ContainerClient:
             A client object for interacting with the specified container.
     """
-
-    string_connection = "DefaultEndpointsProtocol=https;"
-    string_connection += f"AccountName={account_name};"
-    string_connection += f"AccountKey={account_key};"
-    string_connection += "EndpointSuffix=core.windows.net;"
+    string_connection = string_connection_blob_storage(account_name, account_key)
     service_client = BlobServiceClient.from_connection_string(string_connection)
     container_client = service_client.get_container_client(container_name)
 
     return container_client
+
+
+def string_connection_blob_storage(account_name: str, account_key: str) -> str:
+    string_connection = "DefaultEndpointsProtocol=https;"
+    string_connection += f"AccountName={account_name};"
+    string_connection += f"AccountKey={account_key};"
+    string_connection += "EndpointSuffix=core.windows.net;"
+    return string_connection
 
 
 def get_azure_primary_key(name_env_variable: str = "AZURE_KEY") -> str:
@@ -206,6 +214,7 @@ def generate_pandas_dataframe_from_blob(
     list_name_path = []
     list_page = []
     list_content = []
+    list_index_document = []
 
     for i, path in enumerate(list_path_blobs):
         pdf_binary = retrieve_file_from_blob_storage(blob_container_, path)
@@ -218,9 +227,10 @@ def generate_pandas_dataframe_from_blob(
             list_name_path.append(path)
             list_page.append(j)
             list_content.append(page.extract_text())
+            list_index_document.append(i)
 
-    columns_name = ["name_path", "page", "content"]
-    columns_data = [list_name_path, list_page, list_content]
+    columns_name = ["name_path", "index_document", "page", "content"]
+    columns_data = [list_name_path, list_index_document, list_page, list_content]
     dict_pdf_info = dict(zip(columns_name, columns_data))
     return pd.DataFrame(dict_pdf_info)
 
@@ -242,8 +252,16 @@ def clean_content(x: str) -> str:
     str
         The cleaned text with line breaks, strange symbols, and double spaces removed.
     """
-    cleaned_text = re.sub(r"[\r\n\t]+|[^a-zA-Z0-9\s.,!?]+| {2,}", " ", x)
-    return cleaned_text
+    x = re.sub(r"[\r\n\t]+|[^a-zA-Z0-9\s.,!?]+| {2,}", " ", x)
+    x = x.lower()
+    x = re.sub(r"\s+", " ", x).strip()
+    x = re.sub(r". ,", "", x)
+    # remove all instances of multiple spaces
+    x = x.replace("..", ".")
+    x = x.replace(". .", ".")
+    x = x.replace("\n", "")
+    x = x.strip()
+    return x
 
 
 def create_clean_pandas_document_dataframe_from_blob(
@@ -283,7 +301,64 @@ def create_clean_pandas_document_dataframe_from_blob(
     return df
 
 
+def pdf_loader_from_blob_container(
+    account_name: str, account_key: str, container_name: str
+):
+    string_connection = string_connection_blob_storage(account_name, account_key)
+    loader = AzureBlobStorageContainerLoader(
+        conn_str=string_connection,
+        container=container_name,
+        prefix="EMBEDDINGS_TEST/ai_papers_segmented",
+    )
+    return loader
+
+
+def pdf_load_lang_chain():
+    azure_key = get_azure_primary_key()
+    loader = pdf_loader_from_blob_container(
+        account_name="westdraid001",
+        account_key=azure_key,
+        container_name="tests-gpt-neoris",
+    )
+
+    c_splitter = CharacterTextSplitter(separator="\n\n", chunk_size=5000)
+    pages = loader.load_and_split(c_splitter)
+    e = time.time()
+    print("running time:", e - s)
+    print(len(pages))
+
+    ############################################################
+    # Add number page
+    files_name = []
+
+    for page in pages:
+        file_name = page.metadata.get("source", False)
+        files_name.append(file_name)
+
+    files_name = list(OrderedDict.fromkeys(files_name))
+    print(files_name)
+    file_name = files_name[0]
+    i = 0
+
+    for page in pages:
+        source = page.metadata["source"]
+
+        if source != file_name:
+            i = -1
+            file_name = source
+
+        i += 1
+        page.metadata["page_number"] = i
+        print(page.metadata)
+
+
 if __name__ == "__main__":
+    s = time.time()
     df = create_clean_pandas_document_dataframe_from_blob().head()
-    print(df)
+    e = time.time()
+    print("running time:", e - s)
+    print(df.head())
     print(df.columns)
+    df.to_csv("./data/documents_per_page.csv")
+    print("\n")
+    s = time.time()
