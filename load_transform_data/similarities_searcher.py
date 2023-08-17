@@ -19,7 +19,7 @@ class SimilaritiesContextSearcher:
 
     def get_dataframe_top_similarities(
         self, df: pd.DataFrame, user_query: str, top_n: int = 3
-    ) -> pd.DataFrame:
+    ) -> None:
         """
         Get the top similar rows from the DataFrame based on a user query.
 
@@ -29,18 +29,18 @@ class SimilaritiesContextSearcher:
             top_n (int, optional): The number of top similar rows to retrieve. Default is 3.
 
         Returns:
-            pd.DataFrame: A DataFrame containing the top similar rows.
+            None
         """
-        self.df = df
+        self.df = df.copy()
+        self.pages = {}
         embedding = get_embedding(user_query, engine="testCX_2")
         logging.info("message embedding created")
         self.df["similarities"] = self.df.ada_v2.apply(
             lambda x: cosine_similarity(x, embedding)
         )
         logging.info("cosine similarity applied")
-        similarities = self.df.sort_values("similarities", ascending=False).head(top_n)
-
-        return similarities
+        self.df = self.df.sort_values("similarities", ascending=False).head(top_n)
+        logging.info(self.df.shape)
 
     def get_context_and_references(self, threshold: float = 0.8) -> tuple[str, str]:
         """
@@ -67,13 +67,14 @@ class SimilaritiesContextSearcher:
 
         file_name = []
         indexes = []
-
+        logging.info(df_similarities.shape)
         for i, row in df_similarities.iterrows():
             file_name.append(row.name_path)
             self.pages[row.name_path] = []
             self.pages[row.name_path].append(row.page)
             indexes.append(i)
-
+        logging.info("pages len")
+        logging.info(len(self.pages))
         context = ""
         for key in self.pages.keys():
 
@@ -103,6 +104,7 @@ class SimilaritiesContextSearcher:
 
         # get the unique values
         ref = set(ref)
+        logging.info(len(ref))
         dict_references = {}
 
         # again transform in dictionary
