@@ -64,6 +64,7 @@ def chatbot(message, history):
         df, message, top_n=5
     )
     text, pages = similarity_searcher.get_context_and_references()
+    # delete the previous request
     history_openai = [{"role": "system", "content": CONTEXT.format(information=text)}]
     logging.info("system context created correctly")
 
