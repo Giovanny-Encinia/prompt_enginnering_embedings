@@ -15,7 +15,7 @@ CONTEXT = """
     ``null`` this is, there is a null in the backticks so you say I do not know
     answer: I do not the answer for this question
     
-    Never response with null, say I do not that question
+    Never response with null, say I do not that question.
     
     ``{information}``\
 """

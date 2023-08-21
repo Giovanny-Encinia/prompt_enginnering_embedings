@@ -50,15 +50,28 @@ def chatbot(message, history):
     time_request = time.time()
     delay_user = time_request - time_response
 
+    # this is for avoid hallucination in references
+    if history:
+        split_last_assistant_message = history[-1][1].split("\n\n`References:`")
+        # there exist references
+        new_join = "".join(split_last_assistant_message[:-1])
+
+        # there not exist references
+        if not new_join:
+            new_join = "".join(split_last_assistant_message)
+
+        history[-1][1] = new_join
+
     if len(history) < 1:
         delay_user = 0
 
     check_user_time_between_questions(delay_user)
     logging.info(delay_user)
-    similarities = similarity_searcher.get_dataframe_top_similarities(
+    similarity_searcher.get_dataframe_top_similarities(
         df, message, top_n=5
     )
     text, pages = similarity_searcher.get_context_and_references()
+    # delete the previous request
     history_openai = [{"role": "system", "content": CONTEXT.format(information=text)}]
     logging.info("system context created correctly")
 
@@ -66,8 +79,8 @@ def chatbot(message, history):
         history_openai.append({"role": "user", "content": user})
         history_openai.append({"role": "assistant", "content": assistant})
 
-    logging.info("History loaded")
     history_openai.append({"role": "user", "content": message})
+    logging.info("History loaded")
     response = get_completion_from_messages(history_openai)
     logging.info("response generated")
 
@@ -122,4 +135,4 @@ connect_api()
 similarity_searcher = SimilaritiesContextSearcher()
 time_response = time.time()
 chat = run_chatbot()
-chat.queue().launch()
+chat.queue().launch(share=True)
