@@ -53,7 +53,14 @@ def chatbot(message, history):
     # this is for avoid hallucination in references
     if history:
         split_last_assistant_message = history[-1][1].split("\n\n`References:`")
-        history[-1][1] = "".join(split_last_assistant_message[:-1])
+        # there exist references
+        new_join = "".join(split_last_assistant_message[:-1])
+
+        # there not exist references
+        if not new_join:
+            new_join = "".join(split_last_assistant_message)
+
+        history[-1][1] = new_join
 
     if len(history) < 1:
         delay_user = 0
